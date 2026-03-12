@@ -1,0 +1,61 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  
+
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from transformers import pipeline
+import pyttsx3
+
+def collect_data():
+    with open("RAG CHATBOT.txt", "r", encoding="utf-8") as f:
+        return f.read()
+
+data = collect_data()
+
+def chunk_data(text, chunk_size=300):
+    words = text.split()
+    return [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+
+chunks = chunk_data(data)
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+def embed_data(chunks):
+    return model.encode(chunks)
+
+embeddings = embed_data(chunks)
+
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatL2(dimension)
+index.add(np.array(embeddings).astype("float32"))
+
+def vector_search(query, k=3):
+    q_emb = model.encode([query])
+    D, I = index.search(np.array(q_emb).astype("float32"), k)
+    return [chunks[i] for i in I[0]]
+
+qa = pipeline("question-answering", model="distilbert-base-cased-distilled-squad")
+
+def rag_pipeline(question):
+    contexts = vector_search(question)
+    return qa(question=question, context=" ".join(contexts))
+
+def voice_interface(question):
+    answer = rag_pipeline(question)
+    engine = pyttsx3.init()
+    engine.say(answer["answer"])
+    engine.runAndWait()
+
+def system_integrator(query):
+    return rag_pipeline(query)
+
+
+if __name__ == "__main__":
+    print(system_integrator("Where is Chaitanya Deemed to be University located?"))
+    print(system_integrator("What is the average placement package?"))
+    print(system_integrator("Which companies recruit students from the university?"))
+    print(system_integrator("What are the popular B.Tech specializations?"))
+
+    # Voice demo
+    voice_interface("Tell me about placement packages at Chaitanya University")
