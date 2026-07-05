@@ -1,0 +1,161 @@
+import os
+import speech_recognition as sr
+import pyttsx3
+
+from docx import Document
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
+from transformers import pipeline
+
+
+DOCX_FILE = "DATA of RAG(2).docx"
+
+
+def load_docx(file_path):
+    doc = Document(file_path)
+
+    text = ""
+
+    for para in doc.paragraphs:
+        text += para.text + "\n"
+
+    return text
+
+
+knowledge_text = load_docx(DOCX_FILE)
+
+print("Knowledge Base Loaded...")
+print(f"Characters Loaded: {len(knowledge_text)}")
+
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=100
+)
+
+chunks = splitter.split_text(knowledge_text)
+
+print("Chunks Created:", len(chunks))
+
+
+embedding_model = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+vector_db = FAISS.from_texts(
+    texts=chunks,
+    embedding=embedding_model
+)
+
+print("Vector Database Ready")
+
+
+generator = pipeline(
+    "text2text-generation",
+    model="google/flan-t5-base",
+    max_new_tokens=256
+)
+
+print("LLM Loaded")
+
+
+
+tts_engine = pyttsx3.init()
+
+tts_engine.setProperty("rate", 170)
+
+
+def speak(text):
+    print("\nBot:", text)
+    tts_engine.say(text)
+    tts_engine.runAndWait()
+
+
+
+recognizer = sr.Recognizer()
+
+
+def listen():
+    with sr.Microphone() as source:
+
+        print("\n🎤 Speak now...")
+
+        recognizer.adjust_for_ambient_noise(
+            source,
+            duration=1
+        )
+
+        audio = recognizer.listen(source)
+
+        try:
+            query = recognizer.recognize_google(audio)
+
+            print("You:", query)
+
+            return query
+
+        except Exception:
+            return None
+
+
+def retrieve_context(question):
+
+    docs = vector_db.similarity_search(
+        question,
+        k=3
+    )
+
+    context = "\n".join(
+        [doc.page_content for doc in docs]
+    )
+
+    return context
+
+
+
+def answer_question(question):
+
+    context = retrieve_context(question)
+
+    prompt = f"""
+You are a university assistant.
+
+Answer only using the provided context.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
+
+    response = generator(prompt)
+
+    return response[0]["generated_text"]
+
+
+
+print("\n================================")
+print("RAG Voice Chatbot Started")
+print("Say 'exit' to stop")
+print("================================\n")
+
+while True:
+
+    user_query = listen()
+
+    if not user_query:
+        continue
+
+    if user_query.lower() == "exit":
+        speak("Goodbye")
+        break
+
+    answer = answer_question(user_query)
+
+    speak(answer)
